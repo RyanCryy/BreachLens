@@ -26,10 +26,216 @@
     report: null,
     chatHistory: [], // [{role, content}]
     scanning: false,
+    // Per-card re-check state, keyed by Finding_Id. Each entry is
+    // { phase, message, checkedAt }; phase ∈ idle|pending|resolved|unresolved|
+    // indeterminate|failed. Lives only in the browser (no server-side persistence)
+    // and is cleared whenever a new scan's results render.
+    recheckState: new Map(),
   };
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+  // ---------- Re-check affordance ----------
+  // Mirror of the server-side Recheck_Router family rules (lib/recheck.js → routeFor).
+  // This is only an affordance hint: the server remains authoritative, so if the client
+  // ever mis-classifies an id the worst case is an honest `indeterminate` from the API,
+  // never a wrong answer. We keep this in sync with the router's families deliberately.
+  const RECHECKABLE_EXACT_IDS = new Set([
+    "spf-missing",
+    "dmarc-missing",
+    "caa-missing",
+    "hdr-hsts",
+    "hdr-csp",
+    "hdr-xfo",
+    "hdr-xcto",
+    "cookie-secure",
+    "cookie-httponly",
+    "cookie-samesite",
+    "mixed-content",
+    "robots-sensitive",
+  ]);
+
+  function isRecheckable(id) {
+    if (typeof id !== "string" || id.length === 0) return false;
+    if (RECHECKABLE_EXACT_IDS.has(id)) return true;
+    // Non_Recheckable: subdomain exposure can't be confirmed by a single passive re-check.
+    if (id.startsWith("subdomain-")) return false;
+    // Dynamic-suffix families that ARE recheckable.
+    if (id.startsWith("ssl-")) return true;
+    if (id.startsWith("exposed-file-")) return true;
+    // Anything else is unrecognized → Non_Recheckable.
+    return false;
+  }
+
+  // Per-card re-check timeout: the client gives up on a single re-check after 30s
+  // (Requirement 6.5). Matches the server's overall re-check cap.
+  const RECHECK_CLIENT_TIMEOUT_MS = 30000;
+
+  // Human-readable label per phase, shown alongside the server message + timestamp.
+  const RECHECK_PHASE_LABEL = {
+    pending: "Re-checking\u2026",
+    resolved: "Resolved",
+    unresolved: "Still present",
+    indeterminate: "Couldn't confirm",
+    failed: "Re-check failed",
+  };
+
+  // Format an epoch-ms timestamp as a local date + time for display (Requirement 6.7).
+  function fmtRecheckTime(ms) {
+    if (!Number.isFinite(ms)) return "";
+    try {
+      return new Date(ms).toLocaleString(undefined, {
+        year: "numeric", month: "short", day: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      });
+    } catch (_) {
+      return new Date(ms).toISOString();
+    }
+  }
+
+  // Render a card's re-check status slot purely from state.recheckState (the source of
+  // truth), so the visual state stays consistent across re-renders. `els.status` is the
+  // <span class="recheck-status"> for the card. Visual phases are distinguished by an
+  // `is-<phase>` class (styled in task 9.3): is-pending / is-resolved / is-unresolved /
+  // is-indeterminate / is-failed (Requirements 6.1, 6.2, 6.3, 6.4, 6.5, 6.6).
+  function renderRecheckStatus(findingId, els) {
+    const slot = els && els.status;
+    if (!slot) return;
+
+    const entry = state.recheckState.get(findingId);
+    if (!entry || entry.phase === "idle") {
+      slot.className = "recheck-status";
+      slot.removeAttribute("data-phase");
+      slot.textContent = "";
+      return;
+    }
+
+    const { phase, message, checkedAt } = entry;
+    slot.className = "recheck-status is-" + phase;
+    slot.setAttribute("data-phase", phase);
+    slot.textContent = ""; // clear before rebuilding
+
+    const label = RECHECK_PHASE_LABEL[phase] || "";
+    if (label) {
+      const labelEl = document.createElement("span");
+      labelEl.className = "recheck-status-label";
+      labelEl.textContent = label;
+      slot.appendChild(labelEl);
+    }
+
+    if (message) {
+      const msgEl = document.createElement("span");
+      msgEl.className = "recheck-status-message";
+      msgEl.textContent = message;
+      slot.appendChild(msgEl);
+    }
+
+    // A timestamp is shown for any completed outcome (Requirement 6.7); never while
+    // pending, and never when no re-check actually ran (checkedAt === null).
+    if (phase !== "pending" && Number.isFinite(checkedAt)) {
+      const timeEl = document.createElement("time");
+      timeEl.className = "recheck-status-time";
+      timeEl.dateTime = new Date(checkedAt).toISOString();
+      timeEl.textContent = "Checked " + fmtRecheckTime(checkedAt);
+      slot.appendChild(timeEl);
+    }
+  }
+
+  // Activation handler for a card's Re-check control. Each card is fully independent:
+  // its phase/message/checkedAt live in state.recheckState keyed by Finding_Id, and only
+  // this card's button is ever disabled, so other cards stay activatable (Req 5.6, 6.4).
+  async function handleRecheckActivation(findingId, els) {
+    if (!findingId || !els) return;
+    const button = els.button;
+
+    // Guard against double-submit: while this card is pending, ignore further clicks
+    // for this card (a stale click can't fire a second request).
+    const current = state.recheckState.get(findingId);
+    if (current && current.phase === "pending") return;
+
+    // Req 5.4: no current domain in client state → indicate unavailable, send NOTHING.
+    // No re-check ran, so no timestamp (checkedAt: null).
+    if (!state.domain) {
+      state.recheckState.set(findingId, {
+        phase: "failed",
+        message: "Re-check unavailable \u2014 run a scan first.",
+        checkedAt: null,
+      });
+      renderRecheckStatus(findingId, els);
+      return;
+    }
+
+    // Req 5.5, 6.4, 6.8: enter the pending phase (visually distinct), replacing any prior
+    // outcome, and disable ONLY this card's button.
+    state.recheckState.set(findingId, { phase: "pending", message: "", checkedAt: null });
+    if (button) {
+      button.disabled = true;
+      button.setAttribute("aria-disabled", "true");
+    }
+    renderRecheckStatus(findingId, els);
+
+    // Req 5.3, 5.7: send EXACTLY ONE POST to /api/recheck with { domain, findingId }.
+    // Req 6.5: enforce a 30s client timeout via AbortController.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), RECHECK_CLIENT_TIMEOUT_MS);
+
+    let entry;
+    try {
+      const res = await fetch("/api/recheck", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ domain: state.domain, findingId }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        // Req 6.6: a non-2xx response is a re-check that couldn't be completed.
+        entry = {
+          phase: "failed",
+          message: "The re-check couldn't be completed. Please try again.",
+          checkedAt: Date.now(),
+        };
+      } else {
+        const data = await res.json().catch(() => null);
+        const status = data && data.status;
+        if (status === "resolved" || status === "unresolved" || status === "indeterminate") {
+          // Req 6.1, 6.2, 6.3, 6.7: record + render the returned status with a timestamp.
+          entry = {
+            phase: status,
+            message: data && typeof data.message === "string" ? data.message : "",
+            checkedAt: Date.now(),
+          };
+        } else {
+          // Unexpected/empty body shape — treat as a failed re-check rather than guessing.
+          entry = {
+            phase: "failed",
+            message: "The re-check returned an unexpected response. Please try again.",
+            checkedAt: Date.now(),
+          };
+        }
+      }
+    } catch (_) {
+      // Req 6.5: network/transport failure or the 30s abort both land here.
+      entry = {
+        phase: "failed",
+        message: "The re-check couldn't be completed. Please try again.",
+        checkedAt: Date.now(),
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+
+    // Req 6.8: the new outcome replaces the previous status display for this card.
+    state.recheckState.set(findingId, entry);
+    renderRecheckStatus(findingId, els);
+
+    // Re-enable this card's button on every terminal outcome (Req 6.5, 6.6 + success).
+    if (button) {
+      button.disabled = false;
+      button.removeAttribute("aria-disabled");
+    }
+  }
 
   // ---------- View switching ----------
   function showView(name) {
@@ -331,6 +537,9 @@
     state.chatHistory = [];
     renderChatEmpty();
 
+    // Per-card re-check state belongs to a single scan — clear it for the new results.
+    state.recheckState.clear();
+
     showView("results");
     staggerReveal();
   }
@@ -381,6 +590,21 @@
       const hasSnippet = f.fixSnippet && String(f.fixSnippet).trim();
       const detailLabel = isInfo ? "Details" : "Why it matters";
 
+      const findingId = f.id || "";
+      const recheckable = isRecheckable(findingId);
+      const idAttr = escapeHtml(findingId);
+      // Footer row: recheckable findings get an activatable Re-check button + an empty
+      // status slot (populated in task 9.2); non-recheckable findings get a disabled,
+      // non-activatable control that never sends a request (Requirements 5.1, 5.2).
+      const recheckRow = recheckable
+        ? `<div class="recheck-row" data-finding-id="${idAttr}">
+             <button type="button" class="recheck-btn" data-finding-id="${idAttr}">Re-check</button>
+             <span class="recheck-status" data-finding-id="${idAttr}" role="status" aria-live="polite"></span>
+           </div>`
+        : `<div class="recheck-row" data-finding-id="${idAttr}">
+             <button type="button" class="recheck-btn is-disabled" data-finding-id="${idAttr}" disabled aria-disabled="true" title="This finding can't be automatically re-checked">Can't auto re-check</button>
+           </div>`;
+
       details.innerHTML = `
         <summary class="finding-summary">
           <span class="sev-badge" style="background:${sev.color}">${sev.label}</span>
@@ -411,6 +635,7 @@
                  </div>`
               : ""
           }
+          ${recheckRow}
         </div>`;
       details.querySelector(".finding-title").textContent = f.title || "Finding";
       details.querySelector(".finding-explanation").textContent = f.explanation || "";
@@ -425,6 +650,18 @@
           e.preventDefault();
           copySnippet(btn, snippet);
         });
+      }
+      // Wire the Re-check control (recheckable cards only). The handler is a no-op seam
+      // in task 9.1; task 9.2 implements the POST /api/recheck flow and result rendering.
+      if (recheckable) {
+        const recheckBtn = details.querySelector(".recheck-btn");
+        const statusSlot = details.querySelector(".recheck-status");
+        if (recheckBtn) {
+          recheckBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            handleRecheckActivation(findingId, { card: details, button: recheckBtn, status: statusSlot });
+          });
+        }
       }
       list.appendChild(details);
     });
@@ -807,6 +1044,23 @@
       const msg = $("#chat-input").value.trim();
       if (msg && !$("#chat-input").disabled) sendChat(msg);
     });
+  }
+
+  // Test-only seam: exposes the internal re-check rendering/state for jsdom DOM tests
+  // (public/app.recheck.test.js). It attaches ONLY when a test harness explicitly opts
+  // in via `window.__BREACHLENS_TEST__ === true`, a flag that is never set in the browser
+  // or in production, so this has zero effect on real usage. It exists because app.js is
+  // an IIFE with no exports, and the re-check control logic (renderFindings + the per-card
+  // activation handler) is otherwise unreachable from a test without driving the entire
+  // scan UI (canvas background, matchMedia, etc.).
+  if (typeof window !== "undefined" && window.__BREACHLENS_TEST__ === true) {
+    window.__bl = {
+      state,
+      isRecheckable,
+      renderFindings,
+      handleRecheckActivation,
+      renderRecheckStatus,
+    };
   }
 
   if (document.readyState === "loading") {
