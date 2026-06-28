@@ -1,0 +1,24 @@
+[build]
+  publish = "public"
+  command = "npm run build"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+# Friendly API routing: /api/scan -> /.netlify/functions/scan
+[[redirects]]
+  from = "/api/scan"
+  to = "/.netlify/functions/scan"
+  status = 200
+
+[[redirects]]
+  from = "/api/chat"
+  to = "/.netlify/functions/chat"
+  status = 200
+
+# SPA-ish fallback for the single static page
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

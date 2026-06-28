@@ -1,0 +1,17 @@
+{
+  "name": "breachlens",
+  "version": "1.0.0",
+  "description": "Passive Security Exposure Scanner — Kiro BuildFest",
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file=.env scripts/dev-server.mjs",
+    "dev:netlify": "netlify dev",
+    "test:checks": "node scripts/test-checks.mjs",
+    "test:scan": "node --env-file=.env scripts/test-scan.mjs",
+    "build": "echo 'No build step — static frontend' && exit 0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
