@@ -17,6 +17,11 @@
   to = "/.netlify/functions/chat"
   status = 200
 
+[[redirects]]
+  from = "/api/recheck"
+  to = "/.netlify/functions/recheck"
+  status = 200
+
 # SPA-ish fallback for the single static page
 [[redirects]]
   from = "/*"

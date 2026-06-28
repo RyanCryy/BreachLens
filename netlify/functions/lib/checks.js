@@ -463,6 +463,25 @@ export async function checkSensitiveFiles(domain) {
   return Promise.all(probes);
 }
 
+// --- Status-only probe of ONE path (used by single-finding re-checks) ---
+// IMPORTANT (ethical/legal): mirrors checkSensitiveFiles — we ONLY inspect the HTTP
+// status code. We deliberately never read, parse, log, or store the response body,
+// since the path may contain real secrets. Status-only is enough to confirm exposure.
+export async function checkFileStatus(domain, path) {
+  try {
+    const res = await fetch(`https://${domain}${path}`, {
+      method: "GET",
+      redirect: "manual",
+      headers: { "User-Agent": "BreachLens/1.0 (security scanner)" },
+      signal: AbortSignal.timeout(6000),
+    });
+    // Status code only. Intentionally never touching res.body / res.text().
+    return { reachable: true, status: res.status, exposed: res.status === 200 };
+  } catch (_) {
+    return { reachable: false, status: null, exposed: false };
+  }
+}
+
 // --- Cookie security flags (operates on Set-Cookie headers already fetched) ---
 export function analyzeCookies(setCookies = []) {
   const result = {
