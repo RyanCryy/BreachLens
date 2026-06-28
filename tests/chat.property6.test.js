@@ -21,7 +21,7 @@ beforeAll(() => {
   delete process.env.OPENAI_API_KEY;
 });
 
-import { resolveRecheckIntent } from "./chat.js";
+import { resolveRecheckIntent } from "../netlify/functions/chat.js";
 
 // A realistic mix of known recheckable family ids plus arbitrary junk ids, so reports
 // contain ids the resolver recognizes as well as ones it doesn't.
