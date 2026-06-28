@@ -25,7 +25,7 @@ const { mockCallLLM, mockCallLLMJson, mockRecheckFinding } = vi.hoisted(() => ({
 
 // Mock the LLM module but keep the REAL LLMError (so `e instanceof LLMError` holds)
 // and the real extractJson.
-vi.mock("./lib/llm.js", async (importOriginal) => {
+vi.mock("../netlify/functions/lib/llm.js", async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
@@ -36,7 +36,7 @@ vi.mock("./lib/llm.js", async (importOriginal) => {
 
 // Mock the router module but keep the REAL STATUS enum and REAL isRecheckable so the
 // non-recheckable branch (subdomain-*) classifies correctly; only recheckFinding is a spy.
-vi.mock("./lib/recheck.js", async (importOriginal) => {
+vi.mock("../netlify/functions/lib/recheck.js", async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
@@ -44,9 +44,9 @@ vi.mock("./lib/recheck.js", async (importOriginal) => {
   };
 });
 
-import chat from "./chat.js";
-import { LLMError } from "./lib/llm.js";
-import { STATUS } from "./lib/recheck.js";
+import chat from "../netlify/functions/chat.js";
+import { LLMError } from "../netlify/functions/lib/llm.js";
+import { STATUS } from "../netlify/functions/lib/recheck.js";
 
 // A report with both recheckable findings and one non-recheckable (subdomain-*) finding.
 const REPORT = {

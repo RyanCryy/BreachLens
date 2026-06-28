@@ -1,7 +1,7 @@
 import { describe, it } from "vitest";
 import fc from "fast-check";
-import { templateOutcome } from "./chat.js";
-import { STATUS } from "./lib/recheck.js";
+import { templateOutcome } from "../netlify/functions/chat.js";
+import { STATUS } from "../netlify/functions/lib/recheck.js";
 
 // Property-based test for chat outcome templating.
 //

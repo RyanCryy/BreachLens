@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import recheck from "./recheck.js";
+import recheck from "../netlify/functions/recheck.js";
 
 // Endpoint contract unit tests for the POST /api/recheck Netlify Function (task 6.3).
 //
