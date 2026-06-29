@@ -287,7 +287,8 @@ export function attachTechStack(report, techStack) {
 
 // ============================================================
 //  PASS 3 — narrative layer (attacker's-eye view + risk trajectory)
-//  One combined call after Pass 2. Grounded strictly in real findings.
+//  One combined call that runs concurrently with Pass 2 (both are dispatched
+//  together in a single Promise.all). Grounded strictly in real findings.
 //  Returns { attackScenario, ifUnaddressed } or null (caller omits on failure).
 // ============================================================
 const PASS3_SYSTEM = [
