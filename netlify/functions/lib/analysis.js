@@ -220,14 +220,14 @@ export async function runPass2(classified, domain, tech) {
 }
 
 // --- Deterministic scoring helpers / full fallback ---
-function computeFallbackScore(findings) {
+export function computeFallbackScore(findings) {
   const weights = { critical: 40, high: 22, medium: 10, low: 3 };
   let score = 0;
   for (const f of findings) score += weights[normalizeSeverity(f.severity)] || 0;
   return Math.min(100, score);
 }
 
-function scoreToLevel(score) {
+export function scoreToLevel(score) {
   if (score >= 70) return "Critical";
   if (score >= 45) return "High";
   if (score >= 20) return "Medium";
