@@ -291,9 +291,13 @@ function messageMatchesFinding(lower, finding) {
   const titleTokens = title.split(/\W+/).filter((t) => t.length >= 4);
   if (titleTokens.some((t) => lower.includes(t))) return true;
 
-  // explicit + prefix-derived aliases.
-  const aliases = FINDING_ALIASES[id] || prefixAliases(id);
-  if (aliases && aliases.some((a) => a && lower.includes(a))) return true;
+  // explicit + prefix-derived aliases. Use hasOwnProperty so reserved ids like
+  // "constructor", "__proto__", or "toString" don't resolve to inherited
+  // Object.prototype members (which would be non-array/truthy and break .some).
+  const aliases = Object.prototype.hasOwnProperty.call(FINDING_ALIASES, id)
+    ? FINDING_ALIASES[id]
+    : prefixAliases(id);
+  if (Array.isArray(aliases) && aliases.some((a) => a && lower.includes(a))) return true;
 
   return false;
 }
