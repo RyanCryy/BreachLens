@@ -500,22 +500,28 @@
     const tpWrap = $("#top-priority-wrap");
     tpWrap.style.display = report.topPriority ? "" : "none";
 
-    // "If left unaddressed" trajectory callout
+    // "If left unaddressed" trajectory callout (optional DOM section)
     const unWrap = $("#unaddressed-wrap");
-    if (report.ifUnaddressed && report.ifUnaddressed.trim()) {
-      $("#unaddressed-text").textContent = report.ifUnaddressed.trim();
-      unWrap.hidden = false;
-    } else {
-      unWrap.hidden = true;
+    const unText = $("#unaddressed-text");
+    if (unWrap) {
+      if (report.ifUnaddressed && report.ifUnaddressed.trim()) {
+        if (unText) unText.textContent = report.ifUnaddressed.trim();
+        unWrap.hidden = false;
+      } else {
+        unWrap.hidden = true;
+      }
     }
 
-    // "How this could be exploited" attacker narrative
+    // "How this could be exploited" attacker narrative (optional DOM section)
     const attackSection = $("#attack-section");
-    if (report.attackScenario && report.attackScenario.trim()) {
-      $("#attack-text").textContent = report.attackScenario.trim();
-      attackSection.hidden = false;
-    } else {
-      attackSection.hidden = true;
+    const attackText = $("#attack-text");
+    if (attackSection) {
+      if (report.attackScenario && report.attackScenario.trim()) {
+        if (attackText) attackText.textContent = report.attackScenario.trim();
+        attackSection.hidden = false;
+      } else {
+        attackSection.hidden = true;
+      }
     }
 
     // Certificate history timeline
@@ -691,6 +697,7 @@
   function renderCertHistory(certs) {
     const section = $("#cert-history");
     const list = $("#cert-timeline");
+    if (!section || !list) return; // optional DOM section — skip if not present
     if (!certs || !certs.length) {
       section.hidden = true;
       return;

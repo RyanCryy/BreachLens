@@ -8,7 +8,12 @@ import { fallbackClassify, deriveFindings, defaultFixSnippet } from "./findings.
 
 const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1 };
 
-// --- PASS 1: one isolated Claude call per finding ---
+// --- PASS 1: one isolated LLM call per finding, run concurrently ---
+// Findings are classified in parallel (Promise.all). LLM output is token-bound,
+// so N small concurrent calls finish faster than one big batched call that has to
+// generate all the prose sequentially. Each call degrades to its deterministic
+// rule on failure, and the whole pass is bounded by the handler's analysis budget.
+// Severity is ALWAYS the deterministic rule value; the LLM only supplies prose.
 function pass1System(provider, tech) {
   const techLine =
     tech && tech.detected && tech.detected.length
@@ -40,6 +45,14 @@ function pass1System(provider, tech) {
     .join("\n");
 }
 
+// Keep fixSnippet to a clean paste-ready literal, or null.
+function normalizeSnippet(s) {
+  if (!s || typeof s !== "string") return null;
+  const trimmed = s.trim();
+  if (!trimmed || trimmed.toLowerCase() === "null") return null;
+  return trimmed;
+}
+
 async function classifyOne(finding, provider, tech) {
   const userContent = [
     `Domain finding to score:`,
@@ -59,7 +72,9 @@ async function classifyOne(finding, provider, tech) {
       messages: [{ role: "user", content: userContent }],
       maxTokens: 600,
       temperature: 0,
-      timeoutMs: 18000,
+      // Tight per-call timeout: a single slow finding shouldn't drag the whole
+      // pass. callLLMJson retries once, so worst case ~2x this before fallback.
+      timeoutMs: 9000,
     });
 
     // Severity is ALWAYS the deterministic rule-based value for this finding type,
@@ -77,17 +92,9 @@ async function classifyOne(finding, provider, tech) {
       _source: "llm",
     };
   } catch (e) {
-    // Per-finding fallback so a single bad call doesn't sink the report
+    // Per-finding fallback so a single bad call doesn't sink the report.
     return { ...fallbackClassify(finding), type: finding.type, _source: "fallback" };
   }
-}
-
-// Keep fixSnippet to a clean paste-ready literal, or null.
-function normalizeSnippet(s) {
-  if (!s || typeof s !== "string") return null;
-  const trimmed = s.trim();
-  if (!trimmed || trimmed.toLowerCase() === "null") return null;
-  return trimmed;
 }
 
 export async function runPass1(findings, provider, tech, onEach) {
@@ -181,7 +188,7 @@ export async function runPass2(classified, domain, tech) {
       ],
       maxTokens: 800,
       temperature: 0,
-      timeoutMs: 20000,
+      timeoutMs: 10000,
     });
 
     return {
@@ -306,7 +313,7 @@ export async function runPass3(report, domain) {
       ],
       maxTokens: 700,
       temperature: 0.4,
-      timeoutMs: 20000,
+      timeoutMs: 10000,
     });
     const attackScenario =
       typeof json.attackScenario === "string" ? json.attackScenario.trim() : "";

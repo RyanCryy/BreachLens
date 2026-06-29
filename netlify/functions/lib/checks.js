@@ -96,7 +96,7 @@ export async function checkDns(domain) {
 }
 
 // --- CAA record lookup. Distinguishes "no record" (missing) from "lookup failed/unsupported" (unknown). ---
-async function lookupCaa(domain) {
+export async function lookupCaa(domain) {
   try {
     const recs = await dns.resolveCaa(domain);
     return {

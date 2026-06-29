@@ -13,6 +13,7 @@ import path from "node:path";
 
 import scan from "../netlify/functions/scan.js";
 import chat from "../netlify/functions/chat.js";
+import recheck from "../netlify/functions/recheck.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
@@ -115,6 +116,7 @@ const server = http.createServer(async (req, res) => {
   const pathname = req.url.split("?")[0];
   if (pathname === "/api/scan") return handleFunction(scan, req, res);
   if (pathname === "/api/chat") return handleFunction(chat, req, res);
+  if (pathname === "/api/recheck") return handleFunction(recheck, req, res);
   return serveStatic(req, res);
 });
 
