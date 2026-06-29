@@ -8,6 +8,13 @@ import { fallbackClassify, deriveFindings, defaultFixSnippet } from "./findings.
 
 const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1 };
 
+// Severity values are normalized before any lookup so mixed-case inputs
+// (e.g. "Critical", "HIGH") resolve to their intended weight/rank rather than
+// silently falling through to 0.
+function normalizeSeverity(severity) {
+  return typeof severity === "string" ? severity.toLowerCase() : severity;
+}
+
 // --- PASS 1: one isolated LLM call per finding, run concurrently ---
 // Findings are classified in parallel (Promise.all). LLM output is token-bound,
 // so N small concurrent calls finish faster than one big batched call that has to
@@ -133,7 +140,9 @@ const PASS2_SYSTEM = [
 
 function sortFindings(findings) {
   return [...findings].sort(
-    (a, b) => (SEVERITY_RANK[b.severity] || 0) - (SEVERITY_RANK[a.severity] || 0)
+    (a, b) =>
+      (SEVERITY_RANK[normalizeSeverity(b.severity)] || 0) -
+      (SEVERITY_RANK[normalizeSeverity(a.severity)] || 0)
   );
 }
 
@@ -194,9 +203,15 @@ export async function runPass2(classified, domain, tech) {
     return {
       overallRiskScore: score,
       riskLevel,
-      summary: json.summary || synthFallbackSummary(domain, sorted),
+      summary:
+        typeof json.summary === "string" && json.summary.trim().length > 0
+          ? json.summary
+          : synthFallbackSummary(domain, sorted),
       findings: sorted,
-      topPriority: json.topPriority || sorted[0].recommendation,
+      topPriority:
+        typeof json.topPriority === "string" && json.topPriority.trim().length > 0
+          ? json.topPriority
+          : sorted[0].recommendation,
       _source: "llm",
     };
   } catch (e) {
@@ -208,7 +223,7 @@ export async function runPass2(classified, domain, tech) {
 function computeFallbackScore(findings) {
   const weights = { critical: 40, high: 22, medium: 10, low: 3 };
   let score = 0;
-  for (const f of findings) score += weights[f.severity] || 0;
+  for (const f of findings) score += weights[normalizeSeverity(f.severity)] || 0;
   return Math.min(100, score);
 }
 
@@ -221,7 +236,10 @@ function scoreToLevel(score) {
 
 function synthFallbackSummary(domain, findings) {
   const counts = { critical: 0, high: 0, medium: 0, low: 0 };
-  for (const f of findings) counts[f.severity] = (counts[f.severity] || 0) + 1;
+  for (const f of findings) {
+    const sev = normalizeSeverity(f.severity);
+    counts[sev] = (counts[sev] || 0) + 1;
+  }
   const parts = [];
   for (const sev of ["critical", "high", "medium", "low"]) {
     if (counts[sev]) parts.push(`${counts[sev]} ${sev}`);
