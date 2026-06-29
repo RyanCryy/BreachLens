@@ -37,6 +37,12 @@ const ANALYSIS_BUDGET_MS = 14000;
 // Severity ordering for the deterministic fallback report (highest first).
 const FALLBACK_SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 
+// Look up a severity's rank, normalizing case first so mixed-case values
+// (e.g. "Critical", "HIGH") resolve to their intended rank rather than 0.
+// Mirrors the normalized severity lookups in lib/analysis.js.
+const fallbackSeverityRank = (severity) =>
+  FALLBACK_SEVERITY_RANK[typeof severity === "string" ? severity.toLowerCase() : severity] || 0;
+
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-headers": "content-type",
@@ -158,10 +164,7 @@ export default async function scan(req) {
         const deterministicReport = () => {
           const sorted = findings
             .map((f) => ({ ...fallbackClassify(f), type: f.type, _source: "fallback" }))
-            .sort(
-              (a, b) =>
-                (FALLBACK_SEVERITY_RANK[b.severity] || 0) - (FALLBACK_SEVERITY_RANK[a.severity] || 0)
-            );
+            .sort((a, b) => fallbackSeverityRank(b.severity) - fallbackSeverityRank(a.severity));
           const r = buildFallbackReport(domain, sorted);
           r.provider = provider;
           r.domain = domain;
@@ -191,8 +194,7 @@ export default async function scan(req) {
           // prose. So we run them CONCURRENTLY, cutting a full LLM round-trip off
           // the critical path. pass3 runs against a deterministic base report.
           const sortedClassified = [...classified].sort(
-            (a, b) =>
-              (FALLBACK_SEVERITY_RANK[b.severity] || 0) - (FALLBACK_SEVERITY_RANK[a.severity] || 0)
+            (a, b) => fallbackSeverityRank(b.severity) - fallbackSeverityRank(a.severity)
           );
           const baseReport = buildFallbackReport(domain, sortedClassified);
 
